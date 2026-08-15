@@ -6654,6 +6654,49 @@ class _RuntimeFallbackResolution(NamedTuple):
     runtime: dict
     selected_model: str | None
     used_fallback: bool
+    selected_provider: str | None = None
+
+
+_MODEL_FALLBACK_NOTICE_TTL_MS = 15_000
+
+
+def _emit_model_fallback_notice(
+    sid: str,
+    *,
+    requested_provider: str | None,
+    requested_model: str | None,
+    resolution: _RuntimeFallbackResolution,
+) -> None:
+    """Tell interactive clients when startup auth selected a fallback route.
+
+    Runtime fallback is emitted by ``AIAgent._emit_pending_fallback_notice``.
+    This covers the earlier construction-time path, where no agent exists yet
+    to fire its normal callback.
+    """
+    if not resolution.used_fallback:
+        return
+    primary_provider = str(requested_provider or "primary").strip() or "primary"
+    primary_model = str(requested_model or "configured model").strip() or "configured model"
+    fallback_provider = str(
+        resolution.selected_provider or resolution.runtime.get("provider") or "fallback"
+    ).strip() or "fallback"
+    fallback_model = str(resolution.selected_model or "configured model").strip() or "configured model"
+    key = f"model-fallback:{sid}"
+    _emit(
+        "notification.show",
+        sid,
+        {
+            "text": (
+                f"Model fallback active: {primary_provider}/{primary_model} is unavailable. "
+                f"Using {fallback_provider}/{fallback_model}."
+            ),
+            "level": "warn",
+            "kind": "ttl",
+            "ttl_ms": _MODEL_FALLBACK_NOTICE_TTL_MS,
+            "key": key,
+            "id": key,
+        },
+    )
 
 
 def _resolve_runtime_with_fallback(
@@ -6706,7 +6749,7 @@ def _resolve_runtime_with_fallback(
                     fb_provider,
                     fb_model,
                 )
-                return _RuntimeFallbackResolution(runtime, fb_model, True)
+                return _RuntimeFallbackResolution(runtime, fb_model, True, fb_provider)
             except Exception:
                 continue
         raise
@@ -6824,6 +6867,12 @@ def _make_agent(
         if resolution.used_fallback:
             if not resolution.selected_model:
                 raise RuntimeError("Auth fallback resolved without a model")
+            _emit_model_fallback_notice(
+                sid,
+                requested_provider=requested_provider,
+                requested_model=model,
+                resolution=resolution,
+            )
             model = resolution.selected_model
         else:
             # The switch already resolved concrete credentials/endpoint; honor
@@ -6849,6 +6898,12 @@ def _make_agent(
         if resolution.used_fallback:
             if not resolution.selected_model:
                 raise RuntimeError("Auth fallback resolved without a model")
+            _emit_model_fallback_notice(
+                sid,
+                requested_provider=requested_provider,
+                requested_model=model,
+                resolution=resolution,
+            )
             model = resolution.selected_model
     _pr = _load_provider_routing()
     return AIAgent(

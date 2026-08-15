@@ -1148,12 +1148,8 @@ class AIAgent:
 
         A provider/model switch is a durable state change operators must see,
         unlike transient retry chatter that ``_clear_status_buffer`` drops.
-        ``try_activate_fallback`` records the switch in
-        ``self._pending_fallback_notice``; this emits it exactly once via
-        ``_emit_status`` and then clears it, so a successful fallback still
-        produces one visible notice.  On terminal failure the buffered switch
-        line is flushed instead (and this notice discarded) — see
-        ``_flush_status_buffer`` — so the user always sees the switch once.
+        Drivers with a notice callback receive a structured warning notice;
+        other drivers retain the existing status-line fallback.
         """
         try:
             notice = getattr(self, "_pending_fallback_notice", None)
@@ -1161,7 +1157,23 @@ class AIAgent:
                 # Clear before emitting so a (swallowed) callback error can't
                 # leave the notice set for a stale re-emit on a later turn.
                 self._pending_fallback_notice = None
-                self._emit_status(notice)
+                if getattr(self, "notice_callback", None):
+                    from agent.credits_tracker import AgentNotice
+
+                    session_id = str(getattr(self, "session_id", "") or "unknown")
+                    key = f"model-fallback:{session_id}"
+                    self._emit_notice(
+                        AgentNotice(
+                            text=str(notice),
+                            level="warn",
+                            kind="ttl",
+                            ttl_ms=15_000,
+                            key=key,
+                            id=key,
+                        )
+                    )
+                else:
+                    self._emit_status(notice)
         except Exception:
             # Never break the conversation loop on a notice hiccup.
             pass

@@ -17044,6 +17044,7 @@ class TestResolveRuntimeWithFallback:
         from hermes_cli.auth import AuthError
 
         captured = {}
+        emitted = []
         fallback_runtime = {
             "provider": "deepseek",
             "api_key": "fb-tok",
@@ -17077,6 +17078,7 @@ class TestResolveRuntimeWithFallback:
             fake_resolve,
         )
         monkeypatch.setattr("run_agent.AIAgent", fake_agent)
+        monkeypatch.setattr(server, "_emit", lambda *event: emitted.append(event))
         monkeypatch.setattr(server, "_load_enabled_toolsets", lambda *_a, **_kw: ["file"])
         monkeypatch.setattr(server, "_get_db", lambda: None)
 
@@ -17095,6 +17097,23 @@ class TestResolveRuntimeWithFallback:
         assert captured["provider"] == "deepseek"
         assert captured["base_url"] == "https://fallback.invalid/v1"
         assert captured["api_key"] == "fb-tok"
+        assert emitted == [
+            (
+                "notification.show",
+                "sid",
+                {
+                    "text": (
+                        "Model fallback active: openai-codex/gpt-5.5 is unavailable. "
+                        "Using deepseek/deepseek-v4-pro."
+                    ),
+                    "level": "warn",
+                    "kind": "ttl",
+                    "ttl_ms": 15_000,
+                    "key": "model-fallback:sid",
+                    "id": "model-fallback:sid",
+                },
+            )
+        ]
 
 
 def test_get_usage_does_not_substitute_cumulative_total_for_context_used():

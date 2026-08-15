@@ -152,8 +152,30 @@ def test_pending_fallback_notice_emitted_once_on_success():
     assert emitted == ["🔄 Switched to fallback model: m1 via p1 → m2 via p2"]
 
 
+def test_pending_fallback_notice_uses_structured_notice_when_available():
+    """A driver with notices receives a visible warning, not a generic
+    status.update that the desktop renderer discards."""
+    agent = _make_bare_agent()
+    emitted = []
+    agent.notice_callback = emitted.append
+    agent.session_id = "sid"
+    agent._pending_fallback_notice = "🔄 Switched to fallback model: m1 via p1 → m2 via p2"
+
+    agent._emit_pending_fallback_notice()
+
+    assert len(emitted) == 1
+    notice = emitted[0]
+    assert notice.text == "🔄 Switched to fallback model: m1 via p1 → m2 via p2"
+    assert notice.level == "warn"
+    assert notice.kind == "ttl"
+    assert notice.ttl_ms == 15_000
+    assert notice.key == "model-fallback:sid"
+    assert notice.id == "model-fallback:sid"
+    assert agent._pending_fallback_notice is None
+
+
 def test_pending_fallback_notice_noop_when_unset():
-    """No fallback this turn → no notice emitted on the success path."""
+    """No fallback this turn means no notice is emitted."""
     agent = _make_bare_agent()
     emitted = []
     agent._emit_status = lambda msg: emitted.append(msg)
