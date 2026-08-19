@@ -635,12 +635,18 @@ def should_require_auth(host: str, allow_public: bool = False) -> bool:
     return host not in _LOOPBACK_HOST_VALUES
 
 
-def _is_accepted_host(host_header: str, bound_host: str) -> bool:
+def _is_accepted_host(
+    host_header: str,
+    bound_host: str,
+    *,
+    public_host: str = "",
+) -> bool:
     """True if the Host header targets the interface we bound to.
 
     Accepts:
     - Exact bound host (with or without port suffix)
     - Loopback aliases when bound to loopback
+    - The explicitly configured dashboard public host when bound to loopback
     - Any host when bound to 0.0.0.0 (explicit opt-in to non-loopback,
       no protection possible at this layer)
     """
@@ -673,7 +679,10 @@ def _is_accepted_host(host_header: str, bound_host: str) -> bool:
     # Loopback bind: accept the loopback names
     bound_lc = bound_host.lower()
     if bound_lc in _LOOPBACK_HOST_VALUES:
-        return host_only in _LOOPBACK_HOST_VALUES
+        public_lc = public_host.strip().lower()
+        return host_only in _LOOPBACK_HOST_VALUES or bool(
+            public_lc and host_only == public_lc
+        )
 
     # Explicit non-loopback bind: require exact host match
     return host_only == bound_lc
@@ -696,7 +705,12 @@ async def host_header_middleware(request: Request, call_next):
     bound_host = getattr(app.state, "bound_host", None)
     if bound_host:
         host_header = request.headers.get("host", "")
-        if not _is_accepted_host(host_header, bound_host):
+        public_host = getattr(app.state, "public_host", "")
+        if not _is_accepted_host(
+            host_header,
+            bound_host,
+            public_host=public_host,
+        ):
             return JSONResponse(
                 status_code=400,
                 content={
@@ -15399,7 +15413,12 @@ def _ws_host_origin_reason(ws: "WebSocket") -> Optional[str]:
         return None
 
     host_header = ws.headers.get("host", "")
-    if not _is_accepted_host(host_header, bound_host):
+    public_host = getattr(app.state, "public_host", "")
+    if not _is_accepted_host(
+        host_header,
+        bound_host,
+        public_host=public_host,
+    ):
         return f"host_mismatch host={host_header or '?'} bound={bound_host}"
 
     origin = ws.headers.get("origin", "")
@@ -15416,7 +15435,11 @@ def _ws_host_origin_reason(ws: "WebSocket") -> Optional[str]:
     if not parsed.netloc:
         return f"origin_mismatch origin={origin} bound={bound_host}"
 
-    if not _is_accepted_host(parsed.netloc, bound_host):
+    if not _is_accepted_host(
+        parsed.netloc,
+        bound_host,
+        public_host=public_host,
+    ):
         return f"origin_mismatch origin={origin} bound={bound_host}"
     return None
 
@@ -18466,6 +18489,43 @@ def start_server(
     # Record the bound host so host_header_middleware can validate incoming
     # Host headers against it. Defends against DNS rebinding (GHSA-ppp5-vxwm-4cf7).
     app.state.bound_host = host
+    # A loopback-bound dashboard may sit behind a local reverse proxy such as
+    # cloudflared. The operator-declared public URL is an additional trusted
+    # Host/Origin boundary; arbitrary forwarded hosts remain rejected.
+    from hermes_cli.dashboard_auth.prefix import resolve_public_url
+
+    _public_url = resolve_public_url()
+    try:
+        app.state.public_host = urllib.parse.urlparse(_public_url).hostname or ""
+    except ValueError:
+        app.state.public_host = ""
+    # A machine may expose multiple loopback dashboard processes at distinct
+    # public hostnames while sharing one HERMES_HOME. Keep this reverse-proxy
+    # trust boundary independent from dashboard.public_url, which is a single
+    # OAuth callback URL and is intentionally loaded from the shared .env.
+    _proxy_host = os.environ.get("HERMES_DASHBOARD_TRUSTED_PROXY_HOST", "").strip()
+    if _proxy_host:
+        try:
+            _parsed_proxy = urllib.parse.urlparse(f"https://{_proxy_host}")
+            if (
+                _parsed_proxy.hostname
+                and not _parsed_proxy.path
+                and not _parsed_proxy.query
+                and not _parsed_proxy.fragment
+                and not _parsed_proxy.username
+                and not _parsed_proxy.password
+            ):
+                app.state.public_host = _parsed_proxy.hostname
+            else:
+                _log.warning(
+                    "Ignoring malformed HERMES_DASHBOARD_TRUSTED_PROXY_HOST=%r",
+                    _proxy_host,
+                )
+        except ValueError:
+            _log.warning(
+                "Ignoring malformed HERMES_DASHBOARD_TRUSTED_PROXY_HOST=%r",
+                _proxy_host,
+            )
 
     # ── Start uvicorn with direct Server API ─────────────────────────
     # We use uvicorn.Server directly (not uvicorn.run) so we can split
