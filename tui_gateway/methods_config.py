@@ -16,6 +16,42 @@ method = _registry.method
 _profile_scoped = _registry.profile_scoped
 
 
+@method("skins.list")
+def _(rid, params: dict) -> dict:
+    """Return every resolved skin so GUI clients can populate their picker."""
+    try:
+        from hermes_cli.skin_engine import list_skins, load_skin
+
+        skins = []
+        for entry in list_skins():
+            try:
+                skin = load_skin(entry["name"])
+            except Exception:
+                # One broken user skin must not hide the rest of the catalogue.
+                continue
+            skins.append(
+                {
+                    "name": skin.name,
+                    "source": entry.get("source", "user"),
+                    "description": entry.get("description", ""),
+                    "colors": skin.colors,
+                    "light_colors": skin.light_colors,
+                    "dark_colors": skin.dark_colors,
+                }
+            )
+        return _ok(
+            rid,
+            {
+                "skins": skins,
+                "active": (_load_cfg().get("display") or {}).get(
+                    "skin", "default"
+                ),
+            },
+        )
+    except Exception as e:
+        return _err(rid, 5013, str(e))
+
+
 @method("projects.discover_repos")
 @_profile_scoped
 def _(rid, params: dict) -> dict:

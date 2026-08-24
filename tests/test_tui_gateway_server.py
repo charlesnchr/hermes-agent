@@ -20,6 +20,52 @@ from tui_gateway import server
 from tui_gateway.transport import bind_transport, reset_transport
 
 
+def test_skins_list_returns_resolved_catalogue(monkeypatch):
+    from hermes_cli import skin_engine
+
+    monkeypatch.setattr(
+        skin_engine,
+        "list_skins",
+        lambda: [
+            {"name": "tokyo-night", "description": "Deep indigo", "source": "user"},
+            {"name": "broken", "description": "", "source": "user"},
+        ],
+    )
+
+    def load_skin(name):
+        if name == "broken":
+            raise ValueError("bad yaml")
+        return types.SimpleNamespace(
+            name=name,
+            colors={"background": "#1a1b26"},
+            light_colors={},
+            dark_colors={"background": "#1a1b26"},
+        )
+
+    monkeypatch.setattr(skin_engine, "load_skin", load_skin)
+    monkeypatch.setattr(server, "_load_cfg", lambda: {"display": {"skin": "tokyo-night"}})
+
+    response = server.handle_request({"id": "1", "method": "skins.list", "params": {}})
+
+    assert response == {
+        "jsonrpc": "2.0",
+        "id": "1",
+        "result": {
+            "skins": [
+                {
+                    "name": "tokyo-night",
+                    "source": "user",
+                    "description": "Deep indigo",
+                    "colors": {"background": "#1a1b26"},
+                    "light_colors": {},
+                    "dark_colors": {"background": "#1a1b26"},
+                }
+            ],
+            "active": "tokyo-night",
+        },
+    }
+
+
 def _dispatch_sync(req: dict, transport=None) -> dict | None:
     """Run one RPC to completion synchronously, regardless of pool routing.
 

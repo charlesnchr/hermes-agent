@@ -1,4 +1,5 @@
-export { ingestBackendSkin } from './backend-sync'
+export { ingestBackendSkin, ingestBackendSkinCatalogue } from './backend-sync'
+export type { BackendSkinEntry } from './backend-sync'
 export { ThemeProvider, useTheme } from './context'
 export { BUILTIN_THEME_LIST, BUILTIN_THEMES, DEFAULT_SKIN_NAME } from './presets'
 export { requestTheme } from './request'

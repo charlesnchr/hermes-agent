@@ -1,5 +1,6 @@
 import type { HermesSkin } from '@hermes/shared/skin'
 
+import { $gateway } from '@/store/gateway'
 import {
   notifyCronChanged,
   notifyPairingChanged,
@@ -12,7 +13,7 @@ import {
 import { dropSessionState, unbindTileRuntime } from '@/store/session-states'
 // Leaf import (not the `@/themes` barrel) to avoid pulling the ThemeProvider
 // module graph into the gateway event hot path.
-import { ingestBackendSkin } from '@/themes/backend-sync'
+import { type BackendSkinEntry, ingestBackendSkin, ingestBackendSkinCatalogue } from '@/themes/backend-sync'
 
 import type { GatewayEventContext } from './types'
 
@@ -24,6 +25,17 @@ export function handleLifecycleEvent(ctx: GatewayEventContext): boolean {
     // Seed the active skin into the desktop theme registry without applying,
     // so a fresh connect never overrides the user's persisted desktop theme.
     ingestBackendSkin((payload as { skin?: HermesSkin } | undefined)?.skin, { apply: false })
+    // The ready event contains only the active skin. Load the full catalogue so
+    // every YAML skin is available in Appearance and the command palette.
+    void $gateway
+      .get()
+      ?.request('skins.list', {})
+      .then(result => {
+        ingestBackendSkinCatalogue((result as { skins?: BackendSkinEntry[] } | undefined)?.skins)
+      })
+      .catch(() => {
+        // Older gateways do not expose this additive RPC.
+      })
     // Backends with the change watcher broadcast pet/cron/sessions change
     // events; consumers demote their legacy polls to slow backstops.
     setChangeEventsAvailable(Boolean((payload as { change_events?: boolean } | undefined)?.change_events))

@@ -1,6 +1,12 @@
 import { beforeEach, describe, expect, it } from 'vitest'
 
-import { $backendThemes, $pendingSkinApply, __resetBackendSkinSync, ingestBackendSkin } from './backend-sync'
+import {
+  $backendThemes,
+  $pendingSkinApply,
+  __resetBackendSkinSync,
+  ingestBackendSkin,
+  ingestBackendSkinCatalogue
+} from './backend-sync'
 
 const skin = (name: string) => ({
   name,
@@ -105,5 +111,32 @@ describe('ingestBackendSkin', () => {
     ingestBackendSkin({ name: '' }, { apply: true })
 
     expect($pendingSkinApply.get()).toBeNull()
+  })
+})
+
+describe('ingestBackendSkinCatalogue', () => {
+  beforeEach(() => __resetBackendSkinSync())
+
+  it('registers every usable custom skin without applying one', () => {
+    ingestBackendSkinCatalogue([
+      { ...skin('tokyo-night'), description: 'Deep indigo with cyan neon' },
+      skin('nord'),
+      skin('default'),
+      skin('mono'),
+      { name: 'broken' }
+    ])
+
+    expect(Object.keys($backendThemes.get()).sort()).toEqual(['nord', 'tokyo-night'])
+    expect($backendThemes.get()['tokyo-night'].description).toBe('Deep indigo with cyan neon')
+    expect($pendingSkinApply.get()).toBeNull()
+  })
+
+  it('is idempotent when the catalogue is unchanged', () => {
+    ingestBackendSkinCatalogue([skin('tokyo-night')])
+    const first = $backendThemes.get()
+
+    ingestBackendSkinCatalogue([skin('tokyo-night')])
+
+    expect($backendThemes.get()).toBe(first)
   })
 })

@@ -92,3 +92,45 @@ export function ingestBackendSkin(skin: HermesSkin | undefined | null, { apply }
     $pendingSkinApply.set(name)
   }
 }
+
+/** One entry returned by the backend's `skins.list` RPC. */
+export interface BackendSkinEntry extends HermesSkin {
+  source?: string
+}
+
+/** Register the backend's full skin catalogue without changing the active theme. */
+export function ingestBackendSkinCatalogue(skins: readonly BackendSkinEntry[] | undefined | null): void {
+  if (!Array.isArray(skins) || skins.length === 0) {
+    return
+  }
+
+  const next: Record<string, DesktopTheme> = { ...$backendThemes.get() }
+  let changed = false
+
+  for (const entry of skins) {
+    const name = (entry && typeof entry === 'object' ? (entry.name ?? '') : '').trim()
+
+    // `default` carries no palette opinion. Built-in desktop themes retain
+    // their hand-tuned palettes rather than being shadowed by terminal skins.
+    if (!name || name === 'default' || BUILTIN_THEMES[name]) {
+      continue
+    }
+
+    const theme = skinToDesktopTheme(entry)
+
+    if (!theme) {
+      continue
+    }
+
+    const described = entry.description ? { ...theme, description: entry.description } : theme
+
+    if (JSON.stringify(next[name]) !== JSON.stringify(described)) {
+      next[name] = described
+      changed = true
+    }
+  }
+
+  if (changed) {
+    $backendThemes.set(next)
+  }
+}

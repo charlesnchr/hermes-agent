@@ -68,16 +68,22 @@ const normalizeMode = (value: string | null): ThemeMode =>
 // it *is* the legacy global slot, so it reads/writes the global directly. Named
 // profiles get their own entry and fall back to that global until assigned, so
 // unassigned profiles and pre-per-profile installs stay on the global value.
-const profilePref = <T extends string>(record: string, legacy: string, normalize: (v: string | null) => T) => ({
-  resolve: (profile: string): T => normalize(storedStringRecord(record)[profile] ?? storedString(legacy)),
-  assign: (profile: string, value: T): void => {
-    if (profile === 'default') {
-      persistString(legacy, value)
-    } else {
-      persistStringRecord(record, { ...storedStringRecord(record), [profile]: value })
+const profilePref = <T extends string>(record: string, legacy: string, normalize: (v: string | null) => T) => {
+  const stored = (profile: string): string | null => storedStringRecord(record)[profile] ?? storedString(legacy)
+
+  return {
+    /** Raw persisted choice, before availability-dependent normalization. */
+    stored,
+    resolve: (profile: string): T => normalize(stored(profile)),
+    assign: (profile: string, value: T): void => {
+      if (profile === 'default') {
+        persistString(legacy, value)
+      } else {
+        persistStringRecord(record, { ...storedStringRecord(record), [profile]: value })
+      }
     }
   }
-})
+}
 
 export const skinPref = profilePref(PROFILE_SKINS_KEY, SKIN_KEY, normalizeSkin)
 export const modePref = profilePref(PROFILE_MODES_KEY, MODE_KEY, normalizeMode)
@@ -386,6 +392,16 @@ export function ThemeProvider({ children }: { children: ReactNode }) {
     setThemeNameState(skinPref.resolve(profileKey))
     setModeState(modePref.resolve(profileKey))
   }, [profileKey])
+
+  // Backend skins arrive after the initial render. Preserve the raw stored
+  // choice through the temporary fallback, then restore it once resolvable.
+  useEffect(() => {
+    const stored = skinPref.stored(profileKey)
+
+    if (stored && stored !== themeName && !RETIRED_SKINS.has(stored) && resolveTheme(stored)) {
+      setThemeNameState(stored)
+    }
+  }, [profileKey, themeName, userThemes, backendThemes, registryVersion])
 
   // Appearance is per-profile localStorage, and every desktop window is another
   // renderer on the same origin — so a switch made in the HUD (or any peer

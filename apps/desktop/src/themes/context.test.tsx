@@ -1,7 +1,7 @@
 import { act, cleanup, render } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 
-import { __resetBackendSkinSync, ingestBackendSkin } from './backend-sync'
+import { __resetBackendSkinSync, ingestBackendSkin, ingestBackendSkinCatalogue } from './backend-sync'
 import { skinPref, ThemeProvider, useTheme } from './context'
 import { everforestTheme } from './presets'
 
@@ -67,6 +67,30 @@ describe('ThemeProvider ← backend skin sync', () => {
       ingestBackendSkin({ name: 'forest', colors: { background: '#001100', ui_text: '#66ff66' } }, { apply: false })
     )
     expect(cssVar('--theme-foreground')).toBe('#ff9f0a')
+  })
+
+  it('restores a persisted backend skin after catalogue hydration', () => {
+    skinPref.assign('default', 'tokyo-night')
+
+    render(
+      <ThemeProvider>
+        <div />
+      </ThemeProvider>
+    )
+
+    expect(window.document.documentElement.dataset.hermesTheme).not.toBe('tokyo-night')
+
+    act(() =>
+      ingestBackendSkinCatalogue([
+        {
+          name: 'tokyo-night',
+          colors: { background: '#1a1b26', ui_text: '#c0caf5', ui_accent: '#7dcfff' }
+        }
+      ])
+    )
+
+    expect(window.document.documentElement.dataset.hermesTheme).toBe('tokyo-night')
+    expect(cssVar('--theme-background-seed')).toBe('#1a1b26')
   })
 })
 
